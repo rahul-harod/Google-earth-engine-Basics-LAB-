@@ -1,0 +1,24 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var India_adm1 = ee.FeatureCollection("users/rharod4/IND_adm1"),
+    L8_TOA = ee.ImageCollection("LANDSAT/LC08/C01/T1_TOA"),
+    TCC = {"opacity":1,"bands":["B4","B3","B2"],"min":-0.025665564018235304,"max":0.3233410475117553,"gamma":1},
+    FCC = {"opacity":1,"bands":["B5","B4","B3"],"min":0.08883601352572441,"max":0.49611460492014886,"gamma":1};
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+print(India_adm1.aggregate_array("NAME_1").getInfo());
+
+var Maharashtra=India_adm1.filterMetadata("NAME_1",'equals','Maharashtra');
+Map.centerObject(Maharashtra,6);
+Map.addLayer(Maharashtra,{'color':'red'},'Maharashtra');
+
+var collection=L8_TOA.filterBounds(Maharashtra).filterDate('2020-04-01','2020-04-17');
+
+print(collection);
+Map.addLayer(collection,TCC,'coll');
+
+var mosaic=collection.mosaic();
+print('Mosaic',mosaic);
+Map.addLayer(mosaic,FCC,'mosaic');
+
+var clipped=mosaic.clip(Maharashtra);
+Map.addLayer(clipped,FCC,'clipped');
+

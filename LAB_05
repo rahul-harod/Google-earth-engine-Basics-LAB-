@@ -1,0 +1,175 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([74.5127041188976, 23.5789655654024]),
+    L8_SR = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2"),
+    TCC = {"opacity":1,"bands":["SR_B4","SR_B3","SR_B2"],"min":0.0052875000000000005,"max":0.11248249999999999,"gamma":1},
+    L8_TOA = ee.ImageCollection("LANDSAT/LC08/C01/T1_TOA"),
+    L8_DN = ee.ImageCollection("LANDSAT/LC08/C01/T1"),
+    reg = 
+    /* color: #98ff00 */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[74.7379238454601, 23.74877105219191],
+          [74.7379238454601, 23.36356305228597],
+          [75.2213222829601, 23.36356305228597],
+          [75.2213222829601, 23.74877105219191]]], null, false);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+L8_SR=L8_SR.filterBounds(geometry).filterDate('2021-02-15','2021-02-20').first();
+print(L8_SR);
+L8_SR=(L8_SR.select('SR_B[1-7]').multiply(2.75e-05)).add(-0.2)
+Map.centerObject(geometry,10)
+Map.addLayer(L8_SR,TCC,'TCC');
+
+L8_TOA=L8_TOA.filterBounds(geometry).filterDate('2021-02-15','2021-02-20').first();
+L8_DN=L8_DN.filterBounds(geometry).filterDate('2021-02-15','2021-02-20').first();
+
+// NDVI
+//method1
+var NDVI_SR=L8_SR.expression('(NIR-RED)/(NIR+RED)',
+      {'NIR':L8_SR.select('SR_B5'),'RED':L8_SR.select('SR_B4')
+    }).rename('NDVI_SR');
+    
+//method2  
+var NDVI_TOA=L8_TOA.normalizedDifference(['B5', 'B4']).rename("NDVI_TOA");
+
+// Method3
+var RED = L8_DN.select('B4');
+var NIR = L8_DN.select('B5');
+var NDVI_DN = (NIR.subtract(RED).divide(NIR.add(RED))).rename('NDVI_DN');
+
+var colormap=[
+    'FFFFFF', 'CE7E45', 'DF923D', 'F1B555', 'FCD163', '99B718', '74A901',
+    '66A000', '529400', '3E8601', '207401', '056201', '004C00', '023B01',
+    '012E01', '011D01', '011301'
+  ];
+Map.addLayer(NDVI_SR,{palette:colormap,min:0,max:0.8},'NDVI_SR')
+Map.addLayer(NDVI_TOA,{palette:colormap,min:0,max:0.8},'NDVI_TOA')
+Map.addLayer(NDVI_DN,{palette:colormap,min:0,max:0.8},'NDVI_DN')
+
+/////histogram
+var options = {
+  title: 'Histogram of NDVI',
+  fontSize: 20,
+  hAxis: {title: 'NDVI'},
+  vAxis: {title: 'count'},
+  series: {
+    0: {color: 'blue'}
+  }
+};
+
+var NDVI=NDVI_SR.toFloat().addBands(NDVI_TOA.toFloat()).addBands(NDVI_DN.toFloat())
+var NDVI=NDVI_SR.addBands(NDVI_TOA.addBands(NDVI_DN))
+
+print(NDVI)
+// Make the histogram, set the options.
+var histogram = ui.Chart.image.histogram(NDVI, reg, 30)
+    .setSeriesNames(['NDVI_SR','NDVI_TOA','NDVI_DN'])
+    .setOptions(options);
+
+// Display the histogram.
+print(histogram);
+
+
+//NDVI split function
+var splitNDVI = function(img){
+  // if NDVI is less than or equal to zero, pixelvalue =0  else pixelvalue=1
+  var class0 = img.lt(0).selfMask().set('val',0);
+  var class1 = img.gte(0.0).and(img.lt(0.3)).selfMask().set('val',1);
+  var class2 = img.gte(0.3).and(img.lt(0.6)).selfMask().set('val',2);
+  var class3 = img.gte(0.6).and(img.lt(0.8)).selfMask().set('val',3);
+  var class4 = img.gte(0.8).selfMask().set('val',4);
+  return ee.ImageCollection.fromImages([
+    class0, class1,class2,class3,class4
+    ])
+};
+
+//split NDVI_SR
+var split_NDVI_SR = splitNDVI(NDVI_SR);
+print(split_NDVI_SR);
+
+var c0_SR = split_NDVI_SR.filterMetadata('val','equals',0);
+var c1_SR = split_NDVI_SR.filterMetadata('val','equals',1);
+var c2_SR = split_NDVI_SR.filterMetadata('val','equals',2);
+var c3_SR = split_NDVI_SR.filterMetadata('val','equals',3);
+
+var background=ee.Image(0).clip(L8_SR.geometry());
+Map.addLayer(background,{palette:['black']},'background')
+
+Map.addLayer(c0_SR,{palette:['blue']},'NDVI SR class 0');
+Map.addLayer(c1_SR,{palette:['green']},'NDVI SR class 1');
+Map.addLayer(c2_SR,{palette:['red']},'NDVI SR class 2');
+Map.addLayer(c3_SR,{palette:['pink']},'NDVI SR class 3');
+
+//split NDVI TOA
+var split_NDVI_TOA = splitNDVI(NDVI_TOA);
+var c2_TOA = split_NDVI_TOA.filterMetadata('val','equals',2);
+
+Map.addLayer(c2_TOA,{palette:['red']},'NDVI TOA class 2');
+
+
+
+var EVI_SR=L8_SR.expression('(2.5*(NIR-RED))/(NIR+6*RED-7.5*BLUE+1)',
+      {'NIR':L8_SR.select('SR_B5'),'RED':L8_SR.select('SR_B4'),'BLUE':L8_SR.select('SR_B2')
+    }).rename('EVI_SR');
+    
+Map.addLayer(EVI_SR,{palette:colormap,min:0,max:0.8},'EVI_SR')
+
+var SAVI_SR=L8_SR.expression('(1.5*(NIR-RED))/(NIR+RED+0.5)',
+      {'NIR':L8_SR.select('SR_B5'),'RED':L8_SR.select('SR_B4')
+    }).rename('SAVI_SR');
+    
+var EVI_SAVI=EVI_SR
+            // .addBands(SAVI_SR);
+
+var NDVI_samp = NDVI_SR.sample(
+    {region: NDVI_SR.geometry(), scale: 30, numPixels: 5000, geometries: true});
+var chart = ui.Chart.image
+                .byRegion({
+                  image: EVI_SAVI,
+                  regions: NDVI_samp,
+                  reducer: ee.Reducer.mean(),
+                  scale: 30,
+                  xProperty: 'NDVI_SR'
+                })
+                .setSeriesNames(['EVI'])
+                // .setSeriesNames(['EVI','SAVI'])
+                .setChartType('ScatterChart')
+                .setOptions({
+                  title: 'EVI-NDVI scatter plot',
+                  // title: 'EVI-NDVI and SAVI-NDVI scatter plot',
+                  hAxis: {
+                    title: 'NDVI',
+                    titleTextStyle: {italic: false, bold: true}
+                  },
+                  vAxis: {
+                    title: 'EVI',
+                    titleTextStyle: {italic: false, bold: true}
+                  },
+                  pointSize: 1,
+                  dataOpacity: 0.6,
+                  colors: ['black'],
+                  // colors: ['black','red'],
+                });
+print(chart);
+
+
+var collection=NDVI_SR.addBands(EVI_SR).addBands(SAVI_SR)
+// statstics
+var MEAN=collection.reduceRegion({reducer:ee.Reducer.mean(),maxPixels:1e13, geometry:reg,scale:30})
+var MIN=collection.reduceRegion({reducer:ee.Reducer.min(),maxPixels:1e13, geometry:reg,scale:30})
+var MAX=collection.reduceRegion({reducer:ee.Reducer.max(),maxPixels:1e13, geometry:reg,scale:30})
+print('min',MIN)
+print('Mean',MEAN)
+print('MAX',MAX)
+
+// Export a cloud-optimized GeoTIFF.
+Export.image.toDrive({
+  image: NDVI,
+  description: 'NDVI',
+  scale: 30,
+  region: reg,
+  fileFormat: 'GeoTIFF',
+});

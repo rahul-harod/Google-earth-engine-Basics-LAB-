@@ -1,0 +1,114 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var ROI = 
+    /* color: #d63000 */
+    /* shown: false */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[72.60549184262965, 19.45305199421052],
+          [72.60549184262965, 18.74711460666133],
+          [73.27016469419215, 18.74711460666133],
+          [73.27016469419215, 19.45305199421052]]], null, false),
+    Point = 
+    /* color: #98ff00 */
+    /* shown: false */
+    ee.Geometry.Point([72.94057485044215, 19.10306259151287]),
+    TCC = {"opacity":1,"bands":["SR_B4","SR_B3","SR_B2"],"min":0.019587500000000008,"max":0.14113750000000003,"gamma":1};
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var L8_SR_all=ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterBounds(Point)
+            .filterDate('2019-03-01','2019-05-30').sort('CLOUD_COVER').first().clip(ROI);
+            
+var L8_DN=ee.ImageCollection("LANDSAT/LC08/C01/T1_RT").filterBounds(Point)
+            .filterDate('2019-03-01','2019-05-30').sort('CLOUD_COVER').first().clip(ROI);
+
+print(L8_SR_all)
+var L8_SR=(L8_SR_all.select('SR_B[1-7]').multiply(2.75e-05)).add(-0.2);
+var L8_ref_LST=(L8_SR_all.select('ST_B10').multiply(0.00341802)).add(149);
+
+Map.centerObject(ROI,10);
+Map.addLayer(L8_SR,TCC,'TCC');
+
+// Spectral Indices calculations
+var NDVI=L8_SR.normalizedDifference(['SR_B5','SR_B4']).rename('NDVI');
+var NDWI=L8_SR.normalizedDifference(['SR_B3','SR_B5']).rename('NDVI');
+
+// Emissivity calculations
+var emissivity=ee.Image(0).clip(ROI).rename('emissivity');
+var pv=ee.Image((NDVI.subtract(0.2)).divide(0.4)).pow(2).rename('Pv');
+pv=pv.where(pv.gte(1.0),1.0);
+// Map.addLayer(pv,{},'pv')
+var e_s=L8_SR.select('SR_B4').multiply(-0.0475).add(0.9788).rename('soil_emiss');
+var e_v=0.98;
+var e_mix=emissivity.expression('ev*pv+es*(1-pv)+4*0.005*pv*(1-pv)',
+                              {'ev':e_v,'pv':pv,'es':e_s});
+emissivity=emissivity.where(NDVI.lt(0.2),e_s); // soil emissivity
+emissivity=emissivity.where(NDVI.gte(0.2).and(NDVI.lte(0.6)),e_mix); // mix surface
+emissivity=emissivity.where(NDVI.gt(0.6),0.985); // veg emissivity
+emissivity=emissivity.where(NDWI.gt(0.0),0.99); // water emissivity
+Map.addLayer(emissivity,{min:0.92,max:0.99},'emiss');
+
+
+// atmospheric correction
+var trans=0.78;
+var upwell=1.90;
+var downwell=3.13;
+
+// TIR B10 DN to radiance
+print("L8_DN",L8_DN)
+var TIR_radiance=L8_DN.expression(
+                  '(Multi*B10+add)',
+                  {
+                    'Multi':ee.Number(L8_DN.get('RADIANCE_MULT_BAND_10')),
+                    'add':ee.Number(L8_DN.get('RADIANCE_ADD_BAND_10')),
+                    'B10':L8_DN.select('B10')
+                  }).rename('TIR_radiance');
+
+
+
+var Atm_corr_radiance=TIR_radiance.expression(
+                      '(TIR_rad-upwell-(1-emiss)*downwell*trans)/(trans*emiss)',
+                      {
+                        'TIR_rad':TIR_radiance,
+                        'upwell':upwell,
+                        'emiss':emissivity,
+                        'downwell':downwell,
+                        'trans':trans
+                      }).rename('corrected_radiance');
+
+// LST estimation by inverting plancks function
+var K1=ee.Image(ee.Number(L8_DN.get('K1_CONSTANT_BAND_10'))).clip(ROI);
+var K2=ee.Image(ee.Number(L8_DN.get('K2_CONSTANT_BAND_10'))).clip(ROI);
+
+var LST=K2.divide(((K1.divide(Atm_corr_radiance)).add(1)).log()).rename('LST');
+var colormap= [
+    '040274', '040281', '0502a3', '0502b8', '0502ce', '0502e6',
+    '0602ff', '235cb1', '307ef3', '269db1', '30c8e2', '32d3ef',
+    '3be285', '3ff38f', '86e26f', '3ae237', 'b5e22e', 'd6e21f',
+    'fff705', 'ffd611', 'ffb613', 'ff8b13', 'ff6e08', 'ff500d',
+    'ff0000', 'de0101', 'c21301', 'a71001', '911003'
+  ];
+Map.addLayer(LST,{min:290,max:330,palette:colormap},'LST_estimated');
+Map.addLayer(L8_ref_LST,{min:290,max:330,palette:colormap},'LST_reference')
+
+// RMSE estimation
+var diff_square=(L8_ref_LST.subtract(LST)).pow(2).rename('Squared_diff');
+var RMSE=(ee.Number(diff_square.reduceRegion({
+                reducer: ee.Reducer.mean(),
+                scale:30,
+                maxPixels: 1e13,
+                geometry:ROI
+                }).get('Squared_diff')).sqrt());
+print("RMSE(K)",RMSE)
+
+// Bias= Average(LST_ref-LST_estimated)
+var diff=(L8_ref_LST.subtract(LST)).rename('LST_diff');
+var BIAS=(ee.Number(diff.reduceRegion({
+                reducer: ee.Reducer.mean(),
+                scale:30,
+                maxPixels: 1e13,
+                geometry:ROI
+                }).get('LST_diff')));
+print("BIAS(K)",BIAS)

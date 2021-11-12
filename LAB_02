@@ -1,0 +1,78 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var FCC = {"opacity":1,"bands":["B5","B4","B3"],"min":0.05404071509838104,"max":0.15798549354076385,"gamma":1},
+    region = 
+    /* color: #d63000 */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[72.76970991095641, 19.17492655264466],
+          [72.76970991095641, 18.888018894645654],
+          [72.96746381720641, 18.888018894645654],
+          [72.96746381720641, 19.17492655264466]]], null, false),
+    TCC = {"opacity":1,"bands":["B4","B3","B2"],"min":0.07249000452341028,"max":0.15386504331703496,"gamma":1.1520000000000001},
+    hist_roi = 
+    /* color: #98ff00 */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[72.85392396896731, 19.10841089434315],
+          [72.85392396896731, 19.080144610244254],
+          [72.87898653000246, 19.080144610244254],
+          [72.87898653000246, 19.10841089434315]]], null, false);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+var collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_TOA');
+
+var start = ee.Date('2019-01-01');
+var finish = ee.Date('2019-03-31');
+
+var datasetColl = collection.filterBounds(region)
+                           .filterDate(start, finish)
+                           .sort('CLOUD_COVER', true)
+                         
+print(datasetColl);
+print(datasetColl.aggregate_array('DATE_ACQUIRED'));
+print(datasetColl.aggregate_array('CLOUD_COVER'));
+
+var data=datasetColl.first();
+Map.centerObject(region,10);
+Map.addLayer(data,FCC,'L8_2019-01-20');
+// Map.addLayer(region,{color:'red'},'region');
+
+// Histogram plot
+// var hist_roi= ee.Geometry.Polygon(
+//                                   [[[72.64, 19.07],
+//                                   [72.72, 19.07],
+//                                   [72.72, 19.15],
+//                                   [72.64, 19.15],
+//                                   [72.64, 19.07]]]);
+
+var hist=ee.Image(data.select(['B2','B3','B4','B5']));
+var chart1 =ui.Chart.image.histogram({image: hist , region: hist_roi, scale: 30,maxPixels :1e13})
+        .setSeriesNames(['BLUE','GREEN','RED','NIR'])
+        .setOptions({
+          title: 'Histogram',
+          hAxis: {
+            title: 'TOA Reflectance',
+            titleTextStyle: {italic: false, bold: true},
+          },
+          vAxis:
+              {title: 'Number of pixels', titleTextStyle: {italic: false, bold: true}},
+          colors: ['blue', 'green','red','black']
+        });
+print(chart1);
+
+// Export image to drive
+// Export.image.toDrive({
+//   image: data.select(['B2','B3','B4','B5']),
+//   description: '2019-01-20',
+//   scale: 30,
+//   region: region
+// });
+
